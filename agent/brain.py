@@ -74,8 +74,6 @@ class AgentBrain:
         actions_needed = []
 
         for iteration in range(10):
-            print(f"[DEBUG] Tool loop iteration {iteration}, messages={len(messages)}")
-
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,
@@ -83,8 +81,6 @@ class AgentBrain:
                 tools=AGENT_TOOLS,
                 messages=messages,
             )
-
-            print(f"[DEBUG] stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
 
             tool_uses = []
             response_text = ""
@@ -98,10 +94,8 @@ class AgentBrain:
                         "tool": block.name,
                         "input": block.input,
                     })
-                    print(f"[DEBUG] Tool called: {block.name} input={json.dumps(block.input, default=str)}")
 
             if not tool_uses:
-                print(f"[DEBUG] No tools called, final response length={len(response_text)}")
                 break
 
             messages.append({"role": "assistant", "content": response.content})
@@ -116,13 +110,11 @@ class AgentBrain:
 
             tool_results = []
             for tool_use_block in tool_uses_sorted:
-                print(f"[DEBUG] Executing tool: {tool_use_block.name}")
                 result = self._execute_tool(
                     tool_use_block.name,
                     tool_use_block.input,
                     phone_number,
                 )
-                print(f"[DEBUG] Tool result: {tool_use_block.name} -> {result}")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use_block.id,
@@ -132,7 +124,6 @@ class AgentBrain:
             messages.append({"role": "user", "content": tool_results})
 
         if not response_text:
-            print("[DEBUG] Respuesta vacia tras tool loop, solicitando respuesta explicita")
             try:
                 nudge_messages = messages + [{
                     "role": "user",
@@ -148,7 +139,6 @@ class AgentBrain:
                     if block.type == "text":
                         response_text = block.text
                         break
-                print(f"[DEBUG] Respuesta de fallback length={len(response_text)}")
             except Exception as e:
                 print(f"[ERROR] Fallback de respuesta vacia: {e}")
 
@@ -200,7 +190,6 @@ class AgentBrain:
                     # Guardia: si ya hay una cita agendada, redirigir a reschedule_visit
                     existing_lead = self.memory.get_lead(phone_number)
                     if existing_lead and existing_lead.fecha_visita:
-                        print(f"[DEBUG] schedule_visit llamado con cita existente — redirigiendo a reschedule_visit")
                         return self._execute_tool("reschedule_visit", tool_input, phone_number)
 
                     event_id = calendar.create_event(dt, nombre, phone_number, num_personas)
@@ -214,24 +203,18 @@ class AgentBrain:
             elif tool_name == "cancel_visit":
                 motivo = tool_input.get("motivo", "No especificado")
 
-                # 1. Obtener lead y cita
                 lead = self.memory.get_or_create_lead(phone_number)
                 old_appointment = self.memory.get_appointment(lead.id) if lead.id else None
 
-                # 2. Eliminar evento de Calendar
                 if old_appointment and old_appointment.google_calendar_event_id:
                     calendar.delete_event(old_appointment.google_calendar_event_id)
-                    print(f"[DEBUG] Calendar event deleted on cancellation: {old_appointment.google_calendar_event_id}")
 
-                # 3. Actualizar estado del appointment
                 if old_appointment:
                     old_appointment.estado = "cancelado"
                     self.memory.db.commit()
 
-                # 4. Actualizar lead
                 self.memory.update_lead(phone_number, estado="Cancelado", motivo_rechazo=f"Canceló cita: {motivo}", fecha_visita=None)
 
-                # 5. Actualizar Sheets
                 updated_lead = self.memory.get_lead(phone_number)
                 if updated_lead:
                     lead_dict = {
@@ -255,7 +238,6 @@ class AgentBrain:
                     }
                     sheets.append_lead(lead_dict)
 
-                # 6. Alerta Telegram
                 lead_dict_telegram = {
                     "nombre": lead.nombre,
                     "whatsapp": phone_number,
@@ -273,18 +255,14 @@ class AgentBrain:
                 if not (date_str and time_str):
                     return json.dumps({"rescheduled": False, "error": "Missing date or time"})
 
-                # 1. Buscar cita anterior y eliminar evento de Calendar
                 lead = self.memory.get_or_create_lead(phone_number)
                 old_appointment = self.memory.get_appointment(lead.id) if lead.id else None
                 if old_appointment and old_appointment.google_calendar_event_id:
                     calendar.delete_event(old_appointment.google_calendar_event_id)
-                    print(f"[DEBUG] Old event deleted: {old_appointment.google_calendar_event_id}")
 
-                # 2. Crear nuevo evento en Calendar
                 dt = datetime.fromisoformat(f"{date_str}T{time_str}")
                 new_event_id = calendar.create_event(dt, nombre, phone_number, num_personas)
 
-                # 3. Actualizar appointment en DB
                 if old_appointment:
                     old_appointment.fecha_hora = dt
                     old_appointment.google_calendar_event_id = new_event_id
@@ -294,10 +272,8 @@ class AgentBrain:
                     if lead.id:
                         self.memory.save_appointment(phone_number, lead.id, dt, new_event_id)
 
-                # 4. Actualizar lead
                 self.memory.update_lead(phone_number, fecha_visita=dt, reagendo_cita=True)
 
-                # 5. Actualizar Sheets con nueva fila de reagendamiento
                 updated_lead = self.memory.get_lead(phone_number)
                 if updated_lead:
                     sheets.append_lead({
@@ -320,7 +296,6 @@ class AgentBrain:
                         "notas": updated_lead.notas,
                     })
 
-                # 6. Alerta Telegram de reagendamiento
                 lead_dict_telegram = {
                     "nombre": updated_lead.nombre if updated_lead else nombre,
                     "whatsapp": phone_number,
@@ -364,7 +339,6 @@ class AgentBrain:
                         sent_count += 1
                     else:
                         failed_count += 1
-                    print(f"[DEBUG] send_property_photos: {media_type} id={file_id} sent={success}")
                 return json.dumps({"sent": sent_count, "failed": failed_count})
 
             elif tool_name == "notify_owner":
