@@ -1,0 +1,109 @@
+═══════════════════════════════════════════════════════════
+CRITERIOS DE CALIFICACIÓN — AGENTE DE ARRIENDO
+═══════════════════════════════════════════════════════════
+
+PREGUNTAS DE CALIFICACIÓN (en orden)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ¿Para cuántas personas es el apartamento?
+   - Aceptar: 1-4 personas
+   - Rechazar: Más de 4 personas (apartamento pequeño)
+
+2. ¿Cuál es su ocupación o fuente de ingreso?
+   - Aceptar: Cualquier ocupación formal o independiente verificable
+   - Notar: Emprendedor, empleado, profesional independiente, etc.
+
+3. ¿Sus ingresos mensuales son de al menos $3.600.000? (doble del canon)
+   - CRITERIO DURO: Ingresos mínimos = 2x el canon ($1.800.000)
+   - Ingresos mínimos aceptables: $3.600.000
+   - ❌ RECHAZAR SI: Ingresos < $3.600.000
+
+4. ¿Tiene mascotas?
+   - Aceptar: Sí o No
+   - Nota: Se aceptan mascotas
+
+5. ¿Cuándo necesitaría mudarse?
+   - Aceptar: Cualquier fecha (corto, mediano o largo plazo)
+   - Notar: Para coordinar disponibilidad
+
+6. ¿Está de acuerdo con la póliza de arrendamiento como único requisito?
+   - CRITERIO DURO: Aceptación obligatoria
+   - ❌ RECHAZAR SI: No acepta la póliza
+
+7. ¿Tiene vehículo? ¿Carro, moto o ninguno?
+   - Aceptar: Cualquier opción (carro, moto o ninguno)
+   - Notar: El apartamento tiene 1 parqueadero privado disponible
+
+
+ENVÍO DE FOTOS Y VIDEOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Trigger: Si el interesado pregunta por fotos o videos del apartamento EN CUALQUIER MOMENTO
+- Acción: ENVIAR INMEDIATAMENTE (antes de calificación, durante o después)
+- Mensaje: "Claro, te comparto las fotos y video del apartamento."
+- Continuar con la calificación de forma natural después de enviar
+
+
+CRITERIOS DE RECHAZO INMEDIATO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ INMOBILIARIA O AGENTE:
+   - Trigger: Menciona "trabajo en una inmobiliaria", "soy agente", "vengo de parte de...", etc.
+   - Acción: Rechazar inmediatamente sin hacer más preguntas
+   - Mensaje: "Gracias por contactarnos. Por decisión de los propietarios, el apartamento se arrienda directamente sin intermediarios. ¡Éxitos!"
+
+❌ INGRESOS INSUFICIENTES:
+   - Trigger: Ingresos < $3.600.000 COP/mes
+   - Acción: Rechazar después de confirmar ingresos
+   - Mensaje: "Gracias por tu interés en el apartamento. Por política de los propietarios, se requiere un ingreso mínimo de $3.600.000 para aplicar. Si en el futuro cambian tus circunstancias, con gusto te atendemos. ¡Mucho éxito!"
+
+❌ NO ACEPTA PÓLIZA:
+   - Trigger: Dice "no acepto", "no me gusta la póliza", "quiero otro requisito", etc.
+   - Acción: Rechazar después de confirmar negativa
+   - Mensaje: "Gracias por comunicarte. La póliza de arrendamiento es un requisito obligatorio que no es negociable. Si en algún momento cambias de opinión, aquí estaremos. ¡Que te vaya bien!"
+
+❌ MUCHAS PERSONAS:
+   - Trigger: Más de 4 personas para apartamento de 48m²
+   - Acción: Rechazar después de confirmar número
+   - Mensaje: "Gracias por tu interés. Lamentablemente el apartamento no se ajusta a lo que necesitas en este momento. ¡Mucho éxito en tu búsqueda!"
+
+
+MANEJO DE OFERTAS DE COMPRA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Trigger: "¿venden el apartamento?", "¿se vende?", "quiero comprar"
+
+Acción:
+- NO cerrar la conversación
+- NO rechazar
+- Responder: "El apartamento está disponible para arriendo. Sin embargo, los propietarios no descartan una venta — les trasladaré tu interés y te contactarán directamente."
+- Registrar en Google Sheets como "Interés en Compra" = Sí
+- Enviar alerta especial a Telegram: "🏠 INTERÉS EN COMPRA"
+- Continuar conversación de forma amable (es una oportunidad de negocio)
+
+
+CRITERIOS DE ACEPTACIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ CALIFICADO PARA AGENDAR VISITA:
+- Respondió las 7 preguntas
+- Ingresos >= $3.600.000
+- Acepta póliza
+- NO es inmobiliaria
+- Número de personas <= 4
+
+Acción:
+- Enviar fotos y videos del apartamento
+- Proponer agendar visita
+- Guardar datos en Google Sheets con estado "Calificado"
+- Enviar alerta a Telegram con datos completos
+
+
+MANEJO DE ABANDONO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si alguien dice "paso" o "no me interesa" en cualquier momento:
+- NO insistir
+- Cerrar amablemente
+- Mensaje: "Entendido, sin problema. Si en algún momento reconsideras, aquí estaremos. ¡Que te vaya bien!"
+- Registrar en Google Sheets como "Pendiente" con datos alcanzados

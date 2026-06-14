@@ -1,0 +1,53 @@
+apartment:
+  name: "Apartamento Los Robles"
+  location: "Cerca de Unicentro de Occidente, Bogotá"
+  floor: 2
+  area_m2: 48
+  bedrooms: 3
+  bathrooms: 1
+  canon_monthly_cop: 1800000
+  admin_included: true
+  parking_private: true
+  security_type: "Vigilancia privada"
+  has_curtains: true
+
+qualification:
+  min_income_cop: 3600000  # 2x canon
+  max_persons: 4
+  accepts_pets: true
+  accepts_vehicles: true
+  parking_spots: 1
+
+contract:
+  duration_months: 12
+  renewable: true
+  insurance_provider: "Mapfre"
+  insurance_required: true
+
+whatsapp:
+  provider: "ycloud"
+  phone_number: "+573243939750"
+
+integrations:
+  google_calendar:
+    enabled: true
+    advance_hours: 24
+  google_sheets:
+    enabled: true
+    max_rows: 1000
+  telegram:
+    enabled: true
+
+agent:
+  timezone: "America/Bogota"
+  business_hours_24_7: true
+  response_language: "es"
+  tone: "friendly_professional"
+
+timings:
+  reminder_pre_visit_hour: 9
+  reminder_retrigger_hours: 4
+  second_reminder_if_no_response: true
+  abandonment_first_contact_hours: 6
+  abandonment_second_contact_hours: 6
+  max_conversation_days: 30
