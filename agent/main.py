@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -40,8 +40,6 @@ RESCHEDULE_KEYWORDS = [
 ]
 
 # --- Protección anti-bot ---
-RATE_LIMIT_MAX_MESSAGES = 5       # máximo de mensajes permitidos...
-RATE_LIMIT_WINDOW_SECONDS = 120   # ...en esta ventana de tiempo (2 minutos)
 REPEAT_DETECTION_COUNT = 3        # cuántos mensajes iguales consecutivos disparan el bloqueo
 
 
@@ -49,27 +47,6 @@ def user_wants_reschedule(message_text: str) -> bool:
     """Detectar si el usuario está pidiendo reagendar"""
     text_lower = message_text.lower()
     return any(kw in text_lower for kw in RESCHEDULE_KEYWORDS)
-
-
-def check_rate_limit(memory: Memory, phone_number: str) -> bool:
-    """
-    Retorna True si el número supera el rate limit.
-    Cuenta mensajes de rol 'user' en los últimos RATE_LIMIT_WINDOW_SECONDS segundos.
-    """
-    from sqlalchemy import func
-    from agent.models import Conversation
-
-    cutoff = datetime.utcnow() - timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
-    count = (
-        memory.db.query(func.count(Conversation.id))
-        .filter(
-            Conversation.phone_number == phone_number,
-            Conversation.role == "user",
-            Conversation.timestamp >= cutoff,
-        )
-        .scalar()
-    )
-    return count >= RATE_LIMIT_MAX_MESSAGES
 
 
 def check_repeated_messages(memory: Memory, phone_number: str, current_message: str) -> bool:
@@ -153,15 +130,11 @@ async def process_message_background(phone_number: str, message_text: str):
         sheets = GoogleSheetsManager()
         sheets.append_message(phone_number, "user", message_text)
 
-        # 2. Rate limit: ¿demasiados mensajes en poco tiempo?
-        rate_exceeded = check_rate_limit(memory, phone_number)
-
-        # 3. Repetición: ¿mismo mensaje N veces seguidas?
+        # 2. Repetición: ¿mismo mensaje N veces seguidas?
         repeat_detected = check_repeated_messages(memory, phone_number, message_text)
 
-        if rate_exceeded or repeat_detected:
-            reason = "rate_limit" if rate_exceeded else "repeated_messages"
-            print(f"[ANTIBOT] Bloqueado {phone_number} — razón: {reason}")
+        if repeat_detected:
+            print(f"[ANTIBOT] Bloqueado {phone_number} — razón: repeated_messages")
 
             # Alerta Telegram solo una vez por episodio
             if not is_bot_alert_already_sent(memory, phone_number):
@@ -169,7 +142,7 @@ async def process_message_background(phone_number: str, message_text: str):
                 alert_msg = (
                     f"*Posible bot detectado*\n"
                     f"Número: {phone_number}\n"
-                    f"Razón: {'demasiados mensajes en 2 min' if rate_exceeded else 'mensaje repetido ' + str(REPEAT_DETECTION_COUNT) + ' veces'}\n"
+                    f"Razón: mensaje repetido {REPEAT_DETECTION_COUNT} veces seguidas\n"
                     f"Último mensaje: {message_text[:200]}"
                 )
                 telegram.send_message(alert_msg)
