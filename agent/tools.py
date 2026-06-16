@@ -42,7 +42,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "schedule_visit",
-        "description": "Schedule a NEW visit in Google Calendar. Call ONCE after the prospect chooses date and time. Do NOT call if [CITA YA AGENDADA] appears in context — use reschedule_visit instead.",
+        "description": "Schedule a NEW visit in Google Calendar. Call ONCE after the prospect chooses date and time AND you already know their nombre and num_personas. If you don't have nombre or num_personas yet, ask for them in the same message instead of telling the prospect the visit is confirmed — never say the visit is scheduled/confirmed without calling this tool in the same turn. Do NOT call if [CITA YA AGENDADA] appears in context — use reschedule_visit instead.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -84,7 +84,7 @@ AGENT_TOOLS = [
     },
     {
         "name": "update_lead_data",
-        "description": "Save lead info from the conversation. Call ONCE per message with ALL new data collected simultaneously.",
+        "description": "Save lead info from the conversation. Call this in the SAME turn the prospect mentions ANY new piece of data, even just one field — do not wait to collect everything first. If several new fields appear in the same message, include all of them in a single call.",
         "input_schema": {
             "type": "object",
             "properties": {

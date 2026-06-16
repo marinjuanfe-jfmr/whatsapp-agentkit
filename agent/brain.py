@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from datetime import datetime
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -11,6 +12,35 @@ from integrations.sheets import GoogleSheetsManager
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SYSTEM_PROMPT_FILE = "config/prompts.yaml"
+
+# Campos de calificación que se muestran en el bloque [DATOS DEL PROSPECTO]
+CAMPOS_LEAD = [
+    ("nombre", "nombre"),
+    ("personas", "número de personas"),
+    ("ocupacion", "ocupación"),
+    ("mascotas", "mascotas"),
+    ("vehiculos", "vehículos"),
+    ("tipo_vehiculo", "tipo de vehículo"),
+    ("fecha_mudanza", "fecha de mudanza"),
+    ("acepta_poliza", "acepta póliza"),
+    ("ingresos", "ingresos"),
+]
+
+# Frases que sugieren que Robin está confirmando una visita como si ya
+# estuviera agendada (usadas para detectar confirmaciones falsas, sin
+# haber llamado schedule_visit/reschedule_visit en el mismo turno)
+CONFIRMATION_PHRASES = [
+    r"qued[oa]?\s+agend",
+    r"qued[oa]?\s+confirmad",
+    r"qued[oa]?\s+programad",
+    r"te\s+esper",
+    r"nos\s+vemos",
+    r"ah[ií]\s+te\s+esper",
+    r"perfecto,?\s+qued",
+    r"list[oa],?\s+(entonces|as[ií])",
+    r"cita\s+qued",
+    r"visita\s+qued",
+]
 
 PROPERTY_PHOTOS = [
     {"id": "1pY1pOHaFteRL8VhA9094R_0HPMFgoD-Y", "type": "image"},
@@ -56,18 +86,59 @@ class AgentBrain:
             print(f"Error loading system prompt: {e}")
             return "You are a helpful WhatsApp rental agent."
 
+    def _build_status_context(self, lead_status: Dict) -> str:
+        """
+        Construye un bloque de contexto en lenguaje natural con los datos
+        ya conocidos del prospecto y los que faltan. Se agrega a CADA turno
+        para que Robin nunca vuelva a preguntar algo que ya sabe, incluso si
+        la respuesta original ya salió de la ventana de historial reciente.
+        """
+        conocidos = []
+        faltantes = []
+        for campo, etiqueta in CAMPOS_LEAD:
+            valor = lead_status.get(campo)
+            if valor is not None and valor != "":
+                conocidos.append(f"{etiqueta}={valor}")
+            else:
+                faltantes.append(etiqueta)
+
+        bloque = "\n[DATOS DEL PROSPECTO — ya conocidos, NO los vuelvas a preguntar: "
+        bloque += ", ".join(conocidos) if conocidos else "ninguno todavía"
+        bloque += " | Aún faltan: "
+        bloque += ", ".join(faltantes) if faltantes else "ninguno"
+        bloque += "]"
+
+        if lead_status.get("fecha_visita"):
+            bloque += (
+                f"\n[CITA YA AGENDADA: {lead_status['fecha_visita']} — Si el prospecto quiere cambiarla, "
+                f"usa reschedule_visit. NO uses schedule_visit ni get_available_days/times a menos que el "
+                f"prospecto pida explícitamente reagendar.]"
+            )
+        return bloque
+
+    def _looks_like_false_confirmation(self, text: str) -> bool:
+        """
+        Detecta si la respuesta de Robin suena como una confirmación de
+        visita (menciona una hora + lenguaje de confirmación) sin que se
+        haya llamado schedule_visit/reschedule_visit en el mismo turno.
+        """
+        if not text:
+            return False
+        text_lower = text.lower()
+        has_confirmation = any(re.search(p, text_lower) for p in CONFIRMATION_PHRASES)
+        has_time = bool(re.search(r"\d{1,2}:\d{2}", text))
+        return has_confirmation and has_time
+
     def process_message(self, phone_number: str, user_message: str) -> Dict:
         self.memory.save_conversation(phone_number, "user", user_message)
         self.sheets.append_message(phone_number, "user", user_message)
 
-        history = self.memory.get_conversation_history(phone_number, last_n=20)
+        history = self.memory.get_conversation_history(phone_number, last_n=40)
         lead_status = self.memory.get_lead_status(phone_number)
 
         messages = [{"role": m["role"], "content": m["content"]} for m in history]
 
-        status_context = f"\n[LEAD STATUS: {json.dumps(lead_status, default=str)}]"
-        if lead_status.get("fecha_visita"):
-            status_context += f"\n[CITA YA AGENDADA: {lead_status['fecha_visita']} — Si el prospecto quiere cambiarla, usa reschedule_visit. NO uses schedule_visit ni get_available_days/times a menos que el prospecto pida explicitamente reagendar.]"
+        status_context = self._build_status_context(lead_status)
         if messages:
             messages[-1]["content"] += status_context
 
@@ -122,6 +193,82 @@ class AgentBrain:
                 })
 
             messages.append({"role": "user", "content": tool_results})
+
+        # --- Verificación: ¿Robin confirmó una visita sin llamar la tool? ---
+        schedule_called_this_turn = any(
+            a["tool"] in ("schedule_visit", "reschedule_visit") for a in actions_needed
+        )
+        if (
+            not schedule_called_this_turn
+            and not lead_status.get("fecha_visita")
+            and self._looks_like_false_confirmation(response_text)
+        ):
+            print(f"[ALERTA] Posible confirmacion de cita sin tool call — phone={phone_number}")
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "[SISTEMA: Revisa tu mensaje anterior. Si SÍ era una confirmación de visita (mencionaste "
+                    "fecha y hora como si la cita ya estuviera lista) pero no llamaste schedule_visit: si ya "
+                    "tienes el nombre completo y el numero de personas, llama schedule_visit ahora mismo con "
+                    "la fecha y hora mencionadas; si te faltan esos datos, responde pidiéndolos explícitamente "
+                    "sin dar la cita por hecha. Si tu mensaje anterior NO era en realidad una confirmación de "
+                    "cita, ignora esta instrucción y continúa la conversación con normalidad.]"
+                ),
+            })
+            try:
+                for _ in range(3):
+                    corrective_response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=1024,
+                        system=self.system_prompt,
+                        tools=AGENT_TOOLS,
+                        messages=messages,
+                    )
+                    corrective_tool_uses = []
+                    corrective_text = ""
+                    for block in corrective_response.content:
+                        if block.type == "text":
+                            corrective_text = block.text
+                        elif block.type == "tool_use":
+                            corrective_tool_uses.append(block)
+                            actions_needed.append({"tool": block.name, "input": block.input})
+
+                    if corrective_text:
+                        response_text = corrective_text
+
+                    if not corrective_tool_uses:
+                        break
+
+                    messages.append({"role": "assistant", "content": corrective_response.content})
+                    corrective_results = []
+                    for tu in corrective_tool_uses:
+                        result = self._execute_tool(tu.name, tu.input, phone_number)
+                        corrective_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": result,
+                        })
+                    messages.append({"role": "user", "content": corrective_results})
+            except Exception as e:
+                print(f"[ERROR] Pasada correctiva de confirmacion falsa: {e}")
+
+            # Si después de darle la oportunidad de corregirse sigue sin agendar,
+            # avisamos al propietario para que revise manualmente esa conversación.
+            schedule_called_now = any(
+                a["tool"] in ("schedule_visit", "reschedule_visit") for a in actions_needed
+            )
+            if not schedule_called_now:
+                try:
+                    from integrations.telegram import TelegramNotifier
+                    TelegramNotifier().alert_custom_message(
+                        {"nombre": lead_status.get("nombre"), "whatsapp": phone_number},
+                        "Posible cita NO confirmada en el sistema (Robin sugirio una hora pero nunca "
+                        "llamo schedule_visit). Revisa esta conversacion manualmente.\n"
+                        f"Ultimo mensaje de Robin: {response_text[:300]}"
+                    )
+                except Exception as e:
+                    print(f"[ERROR] Alerta de confirmacion falsa no resuelta: {e}")
 
         if not response_text:
             try:
