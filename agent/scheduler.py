@@ -77,10 +77,10 @@ class TaskScheduler:
     def start(self):
         if not self.scheduler.running:
 
-            # Inactividad: revisar cada 5 minutos
+            # Inactividad: revisar cada 5 minutos, empezando de inmediato
             self.scheduler.add_job(
                 self.check_inactivity,
-                IntervalTrigger(minutes=5),
+                IntervalTrigger(minutes=5, start_date=datetime.now(tz=BOGOTA_TZ)),
                 id="check_inactivity",
                 name="Detectar conversaciones inactivas",
             )
@@ -93,10 +93,10 @@ class TaskScheduler:
                 name="Recordatorio visita día anterior",
             )
 
-            # Recordatorio mismo día: revisar cada 30 minutos
+            # Recordatorio mismo día: revisar cada 30 minutos, empezando de inmediato
             self.scheduler.add_job(
                 self.send_reminder_same_day,
-                IntervalTrigger(minutes=30),
+                IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
                 id="reminder_same_day",
                 name="Recordatorio visita mismo día (2h antes)",
             )
@@ -104,13 +104,13 @@ class TaskScheduler:
             # Alerta sin confirmación: revisar cada 30 minutos
             self.scheduler.add_job(
                 self.alert_no_confirmation,
-                IntervalTrigger(minutes=30),
+                IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
                 id="alert_no_confirmation",
                 name="Alerta dueño por visita sin confirmar",
             )
 
             self.scheduler.start()
-            print("[SCHEDULER] Iniciado")
+            print("[SCHEDULER] Iniciado — jobs registrados: check_inactivity (5min), reminder_day_before (18:00), reminder_same_day (30min), alert_no_confirmation (30min)")
 
     def stop(self):
         if self.scheduler.running:
@@ -126,6 +126,7 @@ class TaskScheduler:
         try:
             memory = Memory()
             leads = memory.get_all_leads()
+            print(f"[SCHEDULER] check_inactivity corriendo — {len(leads)} leads en DB")
 
             for lead in leads:
                 phone = lead.phone_number
