@@ -21,7 +21,8 @@ AVAILABLE_WINDOWS = [
 
 
 def get_all_slots() -> list:
-    """Generate all 20-min slots from available windows"""
+    """Generate all 20-min slots from available windows, excluding past slots"""
+    now = datetime.now(tz=BOGOTA_TZ)
     slots = []
     for window in AVAILABLE_WINDOWS:
         current = datetime.strptime(
@@ -31,7 +32,8 @@ def get_all_slots() -> list:
             f"{window['date']} {window['end']}", "%Y-%m-%d %H:%M"
         ).replace(tzinfo=BOGOTA_TZ)
         while current <= end:
-            slots.append(current)
+            if current > now:
+                slots.append(current)
             current += timedelta(minutes=VISIT_DURATION_MINUTES)
     return slots
 

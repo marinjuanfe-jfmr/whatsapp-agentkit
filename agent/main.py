@@ -105,15 +105,12 @@ async def process_message_background(phone_number: str, message_text: str):
                 sent = telegram.alert_qualified_lead(lead_dict)
                 print(f"[DEBUG] Alerta Telegram desde main.py: sent={sent}")
 
-        # Garantizar dirección al confirmar cita (agenda o reagenda)
+        # Garantizar dirección + link Maps al confirmar cita (agenda o reagenda)
         if visit_confirmed and response_text:
-            direccion_incluida = (
-                "111A" in response_text or
-                "88B" in response_text or
-                ("Los Robles" in response_text and "Carrera" in response_text)
-            )
-            if not direccion_incluida:
-                print("[DEBUG] Dirección no incluida — agregando desde main.py")
+            maps_incluido = "maps.app.goo.gl" in response_text or "maps.google.com" in response_text
+            if not maps_incluido:
+                print("[ERROR] Dirección/Maps no incluida — agregando desde main.py")
+                # Remover cualquier mención parcial de dirección que haya puesto el LLM
                 response_text = response_text.rstrip() + "\n\n" + DIRECCION_APARTAMENTO
 
         # Enviar respuesta al WhatsApp
