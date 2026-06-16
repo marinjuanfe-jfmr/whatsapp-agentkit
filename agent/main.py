@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -38,6 +39,11 @@ RESCHEDULE_KEYWORDS = [
     "mover la cita", "posponer", "aplazar", "diferente día", "diferente fecha",
 ]
 
+# --- Protección anti-bot ---
+RATE_LIMIT_MAX_MESSAGES = 5       # máximo de mensajes permitidos...
+RATE_LIMIT_WINDOW_SECONDS = 120   # ...en esta ventana de tiempo (2 minutos)
+REPEAT_DETECTION_COUNT = 3        # cuántos mensajes iguales consecutivos disparan el bloqueo
+
 
 def user_wants_reschedule(message_text: str) -> bool:
     """Detectar si el usuario está pidiendo reagendar"""
@@ -45,9 +51,138 @@ def user_wants_reschedule(message_text: str) -> bool:
     return any(kw in text_lower for kw in RESCHEDULE_KEYWORDS)
 
 
+def check_rate_limit(memory: Memory, phone_number: str) -> bool:
+    """
+    Retorna True si el número supera el rate limit.
+    Cuenta mensajes de rol 'user' en los últimos RATE_LIMIT_WINDOW_SECONDS segundos.
+    """
+    from sqlalchemy import func
+    from agent.models import Conversation
+
+    cutoff = datetime.utcnow() - timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
+    count = (
+        memory.db.query(func.count(Conversation.id))
+        .filter(
+            Conversation.phone_number == phone_number,
+            Conversation.role == "user",
+            Conversation.timestamp >= cutoff,
+        )
+        .scalar()
+    )
+    return count >= RATE_LIMIT_MAX_MESSAGES
+
+
+def check_repeated_messages(memory: Memory, phone_number: str, current_message: str) -> bool:
+    """
+    Retorna True si los últimos REPEAT_DETECTION_COUNT mensajes del usuario
+    son idénticos al mensaje actual (normalizado a minúsculas sin espacios extra).
+    """
+    from agent.models import Conversation
+    from sqlalchemy import desc
+
+    recent = (
+        memory.db.query(Conversation)
+        .filter(
+            Conversation.phone_number == phone_number,
+            Conversation.role == "user",
+        )
+        .order_by(desc(Conversation.timestamp))
+        .limit(REPEAT_DETECTION_COUNT - 1)  # los anteriores al actual
+        .all()
+    )
+
+    if len(recent) < REPEAT_DETECTION_COUNT - 1:
+        return False
+
+    normalized_current = " ".join(current_message.lower().split())
+    for msg in recent:
+        normalized = " ".join(msg.message.lower().split())
+        if normalized != normalized_current:
+            return False
+    return True
+
+
+def is_bot_alert_already_sent(memory: Memory, phone_number: str) -> bool:
+    """
+    Evita enviar múltiples alertas Telegram por el mismo episodio de bot.
+    Usa la nota 'bot_alert_sent' en el campo notas del lead.
+    """
+    lead = memory.get_lead(phone_number)
+    if not lead or not lead.notas:
+        return False
+    return "bot_alert_sent" in lead.notas.split("|")
+
+
+def mark_bot_alert_sent(memory: Memory, phone_number: str) -> None:
+    """Marca que ya se envió alerta de bot para este número."""
+    lead = memory.get_lead(phone_number)
+    notas_actuales = lead.notas if lead and lead.notas else ""
+    notas_lista = [n for n in notas_actuales.split("|") if n] if notas_actuales else []
+    if "bot_alert_sent" not in notas_lista:
+        notas_lista.append("bot_alert_sent")
+        memory.update_lead(phone_number, notas="|".join(notas_lista))
+
+
+def clear_bot_alert_flag(memory: Memory, phone_number: str) -> None:
+    """
+    Limpia la marca de alerta de bot cuando la actividad vuelve a la normalidad.
+    Se llama al inicio de cada mensaje si NO hay rate limit activo.
+    """
+    lead = memory.get_lead(phone_number)
+    if not lead or not lead.notas:
+        return
+    notas_lista = [n for n in lead.notas.split("|") if n and n != "bot_alert_sent"]
+    nueva_notas = "|".join(notas_lista) or None
+    if nueva_notas != lead.notas:
+        memory.update_lead(phone_number, notas=nueva_notas)
+
+
 async def process_message_background(phone_number: str, message_text: str):
     try:
         memory = Memory()
+
+        # ---------------------------------------------------------------
+        # PROTECCIÓN ANTI-BOT — debe ir antes de cualquier otra lógica
+        # ---------------------------------------------------------------
+
+        # 1. Guardar el mensaje del usuario en historial ANTES de los checks
+        #    (necesario para que check_rate_limit y check_repeated_messages
+        #     cuenten el mensaje actual)
+        memory.save_conversation(phone_number, "user", message_text)
+        from integrations.sheets import GoogleSheetsManager
+        sheets = GoogleSheetsManager()
+        sheets.append_message(phone_number, "user", message_text)
+
+        # 2. Rate limit: ¿demasiados mensajes en poco tiempo?
+        rate_exceeded = check_rate_limit(memory, phone_number)
+
+        # 3. Repetición: ¿mismo mensaje N veces seguidas?
+        repeat_detected = check_repeated_messages(memory, phone_number, message_text)
+
+        if rate_exceeded or repeat_detected:
+            reason = "rate_limit" if rate_exceeded else "repeated_messages"
+            print(f"[ANTIBOT] Bloqueado {phone_number} — razón: {reason}")
+
+            # Alerta Telegram solo una vez por episodio
+            if not is_bot_alert_already_sent(memory, phone_number):
+                mark_bot_alert_sent(memory, phone_number)
+                alert_msg = (
+                    f"*Posible bot detectado*\n"
+                    f"Número: {phone_number}\n"
+                    f"Razón: {'demasiados mensajes en 2 min' if rate_exceeded else 'mensaje repetido ' + str(REPEAT_DETECTION_COUNT) + ' veces'}\n"
+                    f"Último mensaje: {message_text[:200]}"
+                )
+                telegram.send_message(alert_msg)
+
+            memory.close()
+            return  # No procesar con el LLM
+
+        # Si ya no hay actividad de bot, limpiar la marca para futuros episodios
+        clear_bot_alert_flag(memory, phone_number)
+
+        # ---------------------------------------------------------------
+        # FLUJO NORMAL
+        # ---------------------------------------------------------------
 
         # Si el lead estaba Inactivo y vuelve a escribir, reactivarlo
         lead_pre = memory.get_lead(phone_number)
@@ -70,7 +205,6 @@ async def process_message_background(phone_number: str, message_text: str):
 
         # Inyectar señal fuerte si es reagendamiento
         if has_existing_visit and wants_reschedule:
-            print(f"[DEBUG] Reagendamiento detectado — inyectando señal en mensaje")
             message_text = (
                 f"{message_text}\n\n"
                 f"[SISTEMA: El prospecto quiere reagendar. Cita actual: {lead_pre.fecha_visita}. "
@@ -102,7 +236,7 @@ async def process_message_background(phone_number: str, message_text: str):
         effective_schedule = schedule_action and not had_existing_visit
         visit_confirmed = effective_schedule or effective_reschedule
 
-        # Al reagendar: limpiar notas de recordatorio para que se envíen de nuevo para la nueva fecha
+        # Al reagendar: limpiar notas de recordatorio para que se envíen de nuevo
         if effective_reschedule:
             lead_reschedule = memory.get_lead(phone_number)
             if lead_reschedule and lead_reschedule.notas:
@@ -120,7 +254,7 @@ async def process_message_background(phone_number: str, message_text: str):
 
         # Garantizar alerta Telegram cuando se agenda por primera vez
         if effective_schedule and "send_lead_alert" not in tool_names:
-            print("[DEBUG] send_lead_alert omitido por LLM — disparando desde main.py")
+            print("[ERROR] send_lead_alert omitido por LLM — disparando desde main.py")
             lead = memory.get_lead(phone_number)
             if lead:
                 lead_dict = {
@@ -133,14 +267,13 @@ async def process_message_background(phone_number: str, message_text: str):
                     "fecha_visita": str(lead.fecha_visita) if lead.fecha_visita else None,
                 }
                 sent = telegram.alert_qualified_lead(lead_dict)
-                print(f"[DEBUG] Alerta Telegram desde main.py: sent={sent}")
+                print(f"[ERROR] Alerta Telegram desde main.py: sent={sent}")
 
         # Garantizar dirección + link Maps al confirmar cita (agenda o reagenda)
         if visit_confirmed and response_text:
             maps_incluido = "maps.app.goo.gl" in response_text or "maps.google.com" in response_text
             if not maps_incluido:
                 print("[ERROR] Dirección/Maps no incluida — agregando desde main.py")
-                # Remover cualquier mención parcial de dirección que haya puesto el LLM
                 response_text = response_text.rstrip() + "\n\n" + DIRECCION_APARTAMENTO
 
         # Enviar respuesta al WhatsApp
@@ -150,8 +283,6 @@ async def process_message_background(phone_number: str, message_text: str):
 
         # Guardar respuesta final en historial y Sheets
         if response_text:
-            from integrations.sheets import GoogleSheetsManager
-            sheets = GoogleSheetsManager()
             memory.save_conversation(phone_number, "assistant", response_text)
             sheets.append_message(phone_number, "assistant", response_text)
 
@@ -231,7 +362,7 @@ async def webhook_whapi(request: Request, background_tasks: BackgroundTasks):
                 mem = Memory()
                 already_processed = mem.is_message_processed(message_id)
                 if already_processed:
-                    print(f"[DEBUG] Mensaje duplicado ignorado: {message_id}")
+                    print(f"[ANTIBOT] Mensaje duplicado ignorado: {message_id}")
                     mem.close()
                     continue
                 mem.mark_message_processed(message_id, phone_number)
