@@ -136,6 +136,13 @@ class TaskScheduler:
                 if estado in ESTADOS_EXCLUIDOS_INACTIVIDAD:
                     continue
 
+                # Si ya tiene una visita agendada, el seguimiento natural son los
+                # recordatorios (día anterior / mismo día), no el ping de "¿sigues ahí?".
+                # Mandarle eso después de que ya quedó la cita lista (ej. justo después
+                # de un simple "gracias") se ve robótico y fuera de lugar.
+                if lead.fecha_visita:
+                    continue
+
                 # Tampoco si ya se envió el cierre
                 if _has_nota(lead, NOTA_CIERRE):
                     continue
