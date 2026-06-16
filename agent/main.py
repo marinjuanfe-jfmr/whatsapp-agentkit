@@ -102,6 +102,22 @@ async def process_message_background(phone_number: str, message_text: str):
         effective_schedule = schedule_action and not had_existing_visit
         visit_confirmed = effective_schedule or effective_reschedule
 
+        # Al reagendar: limpiar notas de recordatorio para que se envíen de nuevo para la nueva fecha
+        if effective_reschedule:
+            lead_reschedule = memory.get_lead(phone_number)
+            if lead_reschedule and lead_reschedule.notas:
+                NOTAS_RECORDATORIO = {
+                    "reminder_day_before_sent",
+                    "reminder_same_day_sent",
+                    "owner_alerted_no_confirmation",
+                }
+                notas_limpias = "|".join(
+                    n for n in lead_reschedule.notas.split("|")
+                    if n not in NOTAS_RECORDATORIO
+                ).strip("|") or None
+                if notas_limpias != lead_reschedule.notas:
+                    memory.update_lead(phone_number, notas=notas_limpias, confirmo_cita=False)
+
         # Garantizar alerta Telegram cuando se agenda por primera vez
         if effective_schedule and "send_lead_alert" not in tool_names:
             print("[DEBUG] send_lead_alert omitido por LLM — disparando desde main.py")

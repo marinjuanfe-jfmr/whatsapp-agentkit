@@ -213,6 +213,8 @@ class TaskScheduler:
             for lead in leads:
                 if not lead.fecha_visita:
                     continue
+                if lead.estado == "Cancelado":
+                    continue
                 if lead.confirmo_cita:
                     continue
                 if _has_nota(lead, NOTA_RECORDATORIO_DIA_ANTERIOR):
@@ -263,6 +265,8 @@ class TaskScheduler:
             leads = memory.get_all_leads()
             for lead in leads:
                 if not lead.fecha_visita:
+                    continue
+                if lead.estado == "Cancelado":
                     continue
                 if lead.confirmo_cita:
                     continue
