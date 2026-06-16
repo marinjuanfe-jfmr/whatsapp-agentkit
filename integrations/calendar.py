@@ -14,10 +14,9 @@ DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", 
 
 AVAILABLE_WINDOWS = [
     {"date": "2026-06-15", "start": "14:30", "end": "18:00"},  # Lunes
-    {"date": "2026-06-16", "start": "10:00", "end": "12:40"},  # Martes mañana
-    {"date": "2026-06-16", "start": "14:00", "end": "18:00"},  # Martes tarde
-    {"date": "2026-06-18", "start": "10:00", "end": "12:40"},  # Jueves mañana
-    {"date": "2026-06-18", "start": "14:00", "end": "18:00"},  # Jueves tarde
+    {"date": "2026-06-16", "start": "14:00", "end": "18:20"},  # Martes tarde
+    {"date": "2026-06-18", "start": "09:40", "end": "13:00"},  # Jueves mañana
+    {"date": "2026-06-18", "start": "14:00", "end": "18:20"},  # Jueves tarde
 ]
 
 

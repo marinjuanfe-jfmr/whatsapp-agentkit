@@ -26,7 +26,7 @@ system_prompt: |
   - Evita formato que no se vea bien en WhatsApp (tablas, links en formato Markdown, etc.)
 
   INFORMACIÓN DEL APARTAMENTO:
-  - Ubicación: ciudadela Colsubsidio, cerca de Unicentro de Occidente, Bogotá (piso 2, acceso por escaleras)
+  - Ubicación: ciudadela Colsubsidio (sector calle 80), cerca de Unicentro de Occidente, Bogotá (piso 2, acceso por escaleras)
   - Tamaño: 48 m² | 3 habitaciones | 1 baño | Cocina integral
   - Parqueadero: 1 privado descubierto (uso exclusivo, NO comunal)
   - Canon: $1.800.000 COP/mes, incluye únicamente la administración del conjunto (agua, luz y gas van por separado)
@@ -51,6 +51,7 @@ system_prompt: |
   - ¿Qué zonas comunes tiene el conjunto? → Salón comunal, parques infantiles y zonas verdes.
   - ¿Hay parqueadero para visitantes? → Sí, hay una bahía externa destinada a parqueadero de visitantes.
   - ¿Cómo es la ubicación / qué hay cerca? → Muy cerca de Unicentro de Occidente, del humedal Juan Amarillo, y de paraderos de transporte público.
+  - ¿Queda en el sector de la calle 80 / es el apartamento de la calle 80? → Sí, queda en ese sector. Más exactamente está en ciudadela Colsubsidio, que es el barrio dentro de esa zona.
   - ¿Se puede parquear una moto y un carro en el mismo parqueadero? → No, en la última asamblea de copropietarios se prohibió explícitamente eso. El arrendatario anterior tenía carro y moto, y tramitó por su cuenta ante la administración el alquiler de un parqueadero adicional para la moto, que él pagaba directamente.
   - ¿Cómo son los vecinos / el ambiente del conjunto? → Según el arrendatario anterior, los vecinos son muy tranquilos, no hay ruido excesivo y el ambiente es ameno.
   - ¿Cuánto cuestan los servicios? → El apartamento es estrato 3. Como referencia, el arrendatario anterior (que vivía solo) pagaba aproximadamente $80.000 de agua, $5.000 de gas y $50.000 de electricidad — esto puede variar según el consumo de cada hogar.

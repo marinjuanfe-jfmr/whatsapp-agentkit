@@ -23,7 +23,9 @@ PORT = int(os.getenv("PORT", 8000))
 
 DIRECCION_APARTAMENTO = (
     "La dirección es: Carrera 111A No. 88B-51, Interior 16, Apto 202, "
-    "Conjunto Residencial Los Robles. Cualquier cosa, Juan Felipe Marín "
+    "Conjunto Residencial Los Robles.\n"
+    "Ubicación en Google Maps: https://maps.app.goo.gl/MZw9n3NBcLqmoHBQ9\n"
+    "Cualquier cosa, Juan Felipe Marín "
     "(el propietario) puede contactarte desde otro número para coordinar "
     "temas adicionales."
 )
