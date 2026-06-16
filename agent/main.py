@@ -49,6 +49,20 @@ async def process_message_background(phone_number: str, message_text: str):
     try:
         memory = Memory()
 
+        # Si el lead estaba Inactivo y vuelve a escribir, reactivarlo
+        lead_pre = memory.get_lead(phone_number)
+        if lead_pre:
+            if lead_pre.estado == "Inactivo":
+                memory.update_lead(phone_number, estado="Pendiente")
+            # Limpiar notas de inactividad para que el ciclo se reinicie
+            if lead_pre.notas:
+                notas_limpias = "|".join(
+                    n for n in lead_pre.notas.split("|")
+                    if n not in ("inactivity_ping_sent", "inactivity_closed")
+                ).strip("|") or None
+                if notas_limpias != lead_pre.notas:
+                    memory.update_lead(phone_number, notas=notas_limpias)
+
         # Pre-check: ¿tiene cita y está pidiendo reagendar?
         lead_pre = memory.get_lead(phone_number)
         has_existing_visit = lead_pre and lead_pre.fecha_visita

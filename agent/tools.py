@@ -98,6 +98,7 @@ AGENT_TOOLS = [
                 "fecha_mudanza": {"type": "string", "description": "Proposed move date"},
                 "acepta_poliza": {"type": "boolean", "description": "Accepts insurance policy requirement (true/false)"},
                 "interes_compra": {"type": "boolean", "description": "Prospect expressed interest in buying the apartment (true/false)"},
+                "confirmo_cita": {"type": "boolean", "description": "Prospect explicitly confirmed they will attend the scheduled visit (true). Set to true when they respond positively to a visit reminder."},
             },
             "required": [],
         },

@@ -1,205 +1,372 @@
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from agent.memory import Memory
+from agent.models import Conversation, Lead
 from integrations.whapi import WhapiClient
 from integrations.telegram import TelegramNotifier
 
+BOGOTA_TZ = ZoneInfo("America/Bogota")
+
+# Minutos de inactividad para cada acción
+INACTIVITY_PING_MINUTES = 10
+INACTIVITY_CLOSE_MINUTES = 20
+
+# Estados que no deben recibir pings de inactividad
+ESTADOS_EXCLUIDOS_INACTIVIDAD = {"Rechazado", "Cancelado", "Inactivo"}
+
+# Nota interna que marca que ya se envió el ping de inactividad
+NOTA_PING = "inactivity_ping_sent"
+NOTA_CIERRE = "inactivity_closed"
+
+# Notas para recordatorios de visita
+NOTA_RECORDATORIO_DIA_ANTERIOR = "reminder_day_before_sent"
+NOTA_RECORDATORIO_MISMO_DIA = "reminder_same_day_sent"
+NOTA_ALERTA_SIN_CONFIRMACION = "owner_alerted_no_confirmation"
+
+
+def _now_bogota() -> datetime:
+    return datetime.now(tz=BOGOTA_TZ)
+
+
+def _last_user_message_time(memory: Memory, phone_number: str):
+    """Devuelve el timestamp (naive UTC) del último mensaje del usuario, o None."""
+    conv = (
+        memory.db.query(Conversation)
+        .filter(
+            Conversation.phone_number == phone_number,
+            Conversation.role == "user",
+        )
+        .order_by(Conversation.timestamp.desc())
+        .first()
+    )
+    return conv.timestamp if conv else None
+
+
+def _minutes_since(ts_utc) -> float:
+    """Minutos transcurridos desde un timestamp UTC naive."""
+    now_utc = datetime.utcnow()
+    return (now_utc - ts_utc).total_seconds() / 60
+
+
+def _has_nota(lead: Lead, nota: str) -> bool:
+    return lead.notas and nota in lead.notas
+
+
+def _add_nota(memory: Memory, phone: str, nota: str):
+    """Agrega una nota al campo notas del lead sin pisar las existentes."""
+    lead = memory.get_lead(phone)
+    existing = lead.notas or ""
+    if nota not in existing:
+        new_notas = (existing + "|" + nota).strip("|")
+        memory.update_lead(phone, notas=new_notas)
+
 
 class TaskScheduler:
-    """Background task scheduler for reminders and follow-ups"""
+    """Background task scheduler para inactividad y recordatorios de visita."""
 
     def __init__(self):
-        self.scheduler = BackgroundScheduler()
+        self.scheduler = BackgroundScheduler(timezone=str(BOGOTA_TZ))
         self.whapi = WhapiClient()
         self.telegram = TelegramNotifier()
-        self.memory = Memory()
 
     def start(self):
-        """Start the scheduler"""
         if not self.scheduler.running:
-            # Check for abandoned conversations every hour
+
+            # Inactividad: revisar cada 5 minutos
             self.scheduler.add_job(
-                self.check_abandoned_conversations,
-                IntervalTrigger(hours=1),
-                id="check_abandoned",
-                name="Check abandoned conversations",
+                self.check_inactivity,
+                IntervalTrigger(minutes=5),
+                id="check_inactivity",
+                name="Detectar conversaciones inactivas",
             )
 
-            # Send visit reminders daily at 9:00 AM
+            # Recordatorio día anterior: cron 18:00 Bogotá
             self.scheduler.add_job(
-                self.send_visit_reminders,
-                CronTrigger(hour=9, minute=0),
-                id="send_visit_reminders",
-                name="Send visit reminders",
+                self.send_reminder_day_before,
+                CronTrigger(hour=18, minute=0, timezone=str(BOGOTA_TZ)),
+                id="reminder_day_before",
+                name="Recordatorio visita día anterior",
+            )
+
+            # Recordatorio mismo día: revisar cada 30 minutos
+            self.scheduler.add_job(
+                self.send_reminder_same_day,
+                IntervalTrigger(minutes=30),
+                id="reminder_same_day",
+                name="Recordatorio visita mismo día (2h antes)",
+            )
+
+            # Alerta sin confirmación: revisar cada 30 minutos
+            self.scheduler.add_job(
+                self.alert_no_confirmation,
+                IntervalTrigger(minutes=30),
+                id="alert_no_confirmation",
+                name="Alerta dueño por visita sin confirmar",
             )
 
             self.scheduler.start()
-            print("[SCHEDULER] Started background tasks")
+            print("[SCHEDULER] Iniciado")
 
     def stop(self):
-        """Stop the scheduler"""
         if self.scheduler.running:
             self.scheduler.shutdown()
-            print("[SCHEDULER] Stopped")
+            print("[SCHEDULER] Detenido")
 
-    def check_abandoned_conversations(self):
-        """Check for leads without response for 6+ hours"""
+    # ─────────────────────────────────────────────
+    # INACTIVIDAD
+    # ─────────────────────────────────────────────
+
+    def check_inactivity(self):
+        """Revisa leads con conversación activa que no han respondido."""
         try:
             memory = Memory()
-            all_leads = memory.get_all_leads(estado="Pendiente")
+            leads = memory.get_all_leads()
 
-            for lead in all_leads:
-                if not lead.phone_number:
+            for lead in leads:
+                phone = lead.phone_number
+                estado = lead.estado or "Pendiente"
+
+                # No molestar a rechazados, cancelados ni ya cerrados por inactividad
+                if estado in ESTADOS_EXCLUIDOS_INACTIVIDAD:
                     continue
 
-                # Get last message timestamp
-                conversations = (
-                    memory.db.query(__import__("agent.models", fromlist=["Conversation"]).Conversation)
-                    .filter_by(phone_number=lead.phone_number)
-                    .order_by(__import__("agent.models", fromlist=["Conversation"]).Conversation.timestamp.desc())
-                    .first()
-                )
-
-                if not conversations:
+                # Tampoco si ya se envió el cierre
+                if _has_nota(lead, NOTA_CIERRE):
                     continue
 
-                time_since_last = datetime.utcnow() - conversations.timestamp
-                hours_since = time_since_last.total_seconds() / 3600
+                last_ts = _last_user_message_time(memory, phone)
+                if not last_ts:
+                    continue
 
-                # First reminder after 6 hours
-                if 6 <= hours_since < 6.5 and lead.notas != "abandoned_first_reminder":
-                    self._send_abandonment_reminder_1(lead, memory)
+                minutes_ago = _minutes_since(last_ts)
 
-                # Second reminder after 12 hours
-                elif hours_since >= 12 and lead.notas != "abandoned_second_reminder":
-                    self._send_abandonment_reminder_2(lead, memory)
+                # Ping de "¿sigues ahí?" a los 10 minutos
+                if (
+                    minutes_ago >= INACTIVITY_PING_MINUTES
+                    and not _has_nota(lead, NOTA_PING)
+                ):
+                    self._send_inactivity_ping(memory, phone)
+
+                # Mensaje de cierre a los 20 minutos
+                elif (
+                    minutes_ago >= INACTIVITY_CLOSE_MINUTES
+                    and _has_nota(lead, NOTA_PING)
+                    and not _has_nota(lead, NOTA_CIERRE)
+                ):
+                    self._send_inactivity_close(memory, phone)
 
             memory.close()
 
         except Exception as e:
-            print(f"Error in check_abandoned_conversations: {e}")
-            self.telegram.alert_technical_error(str(e), "check_abandoned_conversations")
+            print(f"[ERROR] check_inactivity: {e}")
+            try:
+                self.telegram.alert_technical_error(str(e), "check_inactivity")
+            except Exception:
+                pass
 
-    def _send_abandonment_reminder_1(self, lead, memory):
-        """Send first abandonment reminder"""
+    def _send_inactivity_ping(self, memory: Memory, phone: str):
         try:
-            message = "Hola, queria saber si sigues interesado en el apartamento. Continua cuando quieras, con gusto te atiendo."
-            self.whapi.send_text_message(lead.phone_number, message)
-            memory.update_lead(lead.phone_number, notas="abandoned_first_reminder")
-            print(f"[REMINDER] Sent first abandonment reminder to {lead.phone_number}")
-        except Exception as e:
-            print(f"Error sending abandonment reminder 1: {e}")
-
-    def _send_abandonment_reminder_2(self, lead, memory):
-        """Send second abandonment reminder and close"""
-        try:
-            message = "Entendido, cerramos la conversacion por ahora. Si en algun momento retomas tu busqueda, con gusto te atendemos. Que te vaya bien."
-            self.whapi.send_text_message(lead.phone_number, message)
-            memory.update_lead(lead.phone_number, estado="Pendiente", notas="abandoned_closed")
-            print(f"[REMINDER] Sent closing message to {lead.phone_number}")
-        except Exception as e:
-            print(f"Error sending abandonment reminder 2: {e}")
-
-    def send_visit_reminders(self):
-        """Send reminders for visits scheduled for tomorrow"""
-        try:
-            memory = Memory()
-            tomorrow = datetime.utcnow().date() + timedelta(days=1)
-
-            # Get all appointments for tomorrow
-            from agent.models import Appointment
-            appointments = (
-                memory.db.query(Appointment)
-                .filter(
-                    Appointment.fecha_hora >= datetime.combine(tomorrow, __import__("datetime").time.min),
-                    Appointment.fecha_hora < datetime.combine(tomorrow, __import__("datetime").time.max),
-                    Appointment.estado != "cancelada",
-                )
-                .all()
+            msg = (
+                "¿Sigues ahí? Si tienes alguna duda sobre el apartamento, "
+                "con gusto te ayudo."
             )
+            clean = phone.lstrip("+")
+            self.whapi.send_text_message(clean, msg)
+            _add_nota(memory, phone, NOTA_PING)
+            print(f"[SCHEDULER] Ping de inactividad enviado a {phone}")
+        except Exception as e:
+            print(f"[ERROR] _send_inactivity_ping {phone}: {e}")
 
-            for apt in appointments:
-                lead = memory.get_lead_by_id(apt.lead_id)
-                if lead:
-                    self._send_visit_reminder(lead, apt, memory)
+    def _send_inactivity_close(self, memory: Memory, phone: str):
+        try:
+            msg = (
+                "Voy a cerrar la conversación por ahora. "
+                "Si en algún momento quieres retomar o tienes alguna duda, "
+                "no dudes en escribirnos de nuevo. ¡Que te vaya bien!"
+            )
+            clean = phone.lstrip("+")
+            self.whapi.send_text_message(clean, msg)
+            _add_nota(memory, phone, NOTA_CIERRE)
+            memory.update_lead(phone, estado="Inactivo")
+            print(f"[SCHEDULER] Conversación cerrada por inactividad: {phone}")
+        except Exception as e:
+            print(f"[ERROR] _send_inactivity_close {phone}: {e}")
+
+    # ─────────────────────────────────────────────
+    # RECORDATORIO DÍA ANTERIOR (cron 18:00)
+    # ─────────────────────────────────────────────
+
+    def send_reminder_day_before(self):
+        """Manda recordatorio a leads con visita mañana que no han confirmado."""
+        try:
+            memory = Memory()
+            now = _now_bogota()
+            tomorrow = (now + timedelta(days=1)).date()
+
+            leads = memory.get_all_leads()
+            for lead in leads:
+                if not lead.fecha_visita:
+                    continue
+                if lead.confirmo_cita:
+                    continue
+                if _has_nota(lead, NOTA_RECORDATORIO_DIA_ANTERIOR):
+                    continue
+
+                # fecha_visita está en UTC naive en DB — convertir
+                fv = lead.fecha_visita
+                fv_bogota = datetime(
+                    fv.year, fv.month, fv.day,
+                    fv.hour, fv.minute,
+                    tzinfo=BOGOTA_TZ
+                )
+                if fv_bogota.date() != tomorrow:
+                    continue
+
+                hora_str = fv_bogota.strftime("%I:%M %p").lstrip("0")
+                nombre = lead.nombre or "hola"
+
+                msg = (
+                    f"Hola{' ' + nombre if lead.nombre else ''}, te escribo para recordarte "
+                    f"que mañana tienes visita al apartamento a las *{hora_str}*. "
+                    f"¿Confirmas que vas a poder asistir?"
+                )
+                clean = lead.phone_number.lstrip("+")
+                self.whapi.send_text_message(clean, msg)
+                _add_nota(memory, lead.phone_number, NOTA_RECORDATORIO_DIA_ANTERIOR)
+                print(f"[SCHEDULER] Recordatorio día anterior enviado a {lead.phone_number}")
 
             memory.close()
 
         except Exception as e:
-            print(f"Error in send_visit_reminders: {e}")
-            self.telegram.alert_technical_error(str(e), "send_visit_reminders")
+            print(f"[ERROR] send_reminder_day_before: {e}")
+            try:
+                self.telegram.alert_technical_error(str(e), "send_reminder_day_before")
+            except Exception:
+                pass
 
-    def _send_visit_reminder(self, lead, appointment, memory):
-        """Send visit reminder message"""
-        try:
-            fecha_hora = appointment.fecha_hora
-            fecha_str = fecha_hora.strftime("%A, %d de %B")
-            hora_str = fecha_hora.strftime("%H:%M")
+    # ─────────────────────────────────────────────
+    # RECORDATORIO MISMO DÍA (2 horas antes)
+    # ─────────────────────────────────────────────
 
-            message = f"Recordatorio: manana tienes visita al apartamento de Los Robles a las {hora_str}. Confirmas tu asistencia?"
-            self.whapi.send_text_message(lead.phone_number, message)
-            memory.update_lead(lead.phone_number, notas=f"reminder_sent_{fecha_str}")
-            print(f"[REMINDER] Sent visit reminder to {lead.phone_number} for {fecha_str} at {hora_str}")
-
-            # Schedule second reminder in 4 hours if no confirmation
-            self.scheduler.add_job(
-                self._check_visit_confirmation,
-                IntervalTrigger(hours=4),
-                args=[lead.phone_number, appointment.id, fecha_str, hora_str],
-                id=f"visit_confirmation_{appointment.id}",
-                replace_existing=True,
-            )
-
-        except Exception as e:
-            print(f"Error sending visit reminder: {e}")
-
-    def _check_visit_confirmation(self, phone_number: str, appointment_id: int, fecha_str: str, hora_str: str):
-        """Check if visit was confirmed, send second reminder if not"""
+    def send_reminder_same_day(self):
+        """Manda recordatorio si la visita es hoy y faltan ~2 horas."""
         try:
             memory = Memory()
-            lead = memory.get_lead(phone_number)
+            now = _now_bogota()
 
-            if not lead or not lead.confirmo_cita:
-                message = f"Sigues con planes de visitar el apartamento manana a las {hora_str}? Confirma para mantener tu cupo."
-                self.whapi.send_text_message(phone_number, message)
-                memory.update_lead(phone_number, notas="second_reminder_sent")
-                print(f"[REMINDER] Sent second reminder to {phone_number}")
+            leads = memory.get_all_leads()
+            for lead in leads:
+                if not lead.fecha_visita:
+                    continue
+                if lead.confirmo_cita:
+                    continue
+                if _has_nota(lead, NOTA_RECORDATORIO_MISMO_DIA):
+                    continue
 
-                # Schedule alert to owner if still no confirmation in 2 more hours
-                self.scheduler.add_job(
-                    self._alert_owner_no_confirmation,
-                    IntervalTrigger(hours=2),
-                    args=[phone_number, appointment_id, fecha_str, hora_str],
-                    id=f"alert_owner_{appointment_id}",
-                    replace_existing=True,
+                fv = lead.fecha_visita
+                fv_bogota = datetime(
+                    fv.year, fv.month, fv.day,
+                    fv.hour, fv.minute,
+                    tzinfo=BOGOTA_TZ
                 )
 
+                # Solo visitas de hoy
+                if fv_bogota.date() != now.date():
+                    continue
+
+                minutes_until = (fv_bogota - now).total_seconds() / 60
+
+                # Ventana: entre 90 y 150 minutos antes (centrado en 2h,
+                # tolerancia ±30 min por la frecuencia del cron de 30 min)
+                if not (90 <= minutes_until <= 150):
+                    continue
+
+                hora_str = fv_bogota.strftime("%I:%M %p").lstrip("0")
+                nombre = lead.nombre or ""
+
+                msg = (
+                    f"Hola{' ' + nombre if nombre else ''}, tu visita al apartamento "
+                    f"es hoy a las *{hora_str}*. ¿Vas a poder asistir?"
+                )
+                clean = lead.phone_number.lstrip("+")
+                self.whapi.send_text_message(clean, msg)
+                _add_nota(memory, lead.phone_number, NOTA_RECORDATORIO_MISMO_DIA)
+                print(f"[SCHEDULER] Recordatorio mismo día enviado a {lead.phone_number}")
+
             memory.close()
 
         except Exception as e:
-            print(f"Error checking visit confirmation: {e}")
+            print(f"[ERROR] send_reminder_same_day: {e}")
+            try:
+                self.telegram.alert_technical_error(str(e), "send_reminder_same_day")
+            except Exception:
+                pass
 
-    def _alert_owner_no_confirmation(self, phone_number: str, appointment_id: int, fecha_str: str, hora_str: str):
-        """Alert owner if lead hasn't confirmed visit"""
+    # ─────────────────────────────────────────────
+    # ALERTA AL DUEÑO POR FALTA DE CONFIRMACIÓN
+    # ─────────────────────────────────────────────
+
+    def alert_no_confirmation(self):
+        """
+        Si pasaron 3h desde el recordatorio y el lead no confirmó ni canceló,
+        avisa a Juan por Telegram.
+        """
         try:
             memory = Memory()
-            lead = memory.get_lead(phone_number)
+            now = _now_bogota()
 
-            if lead and not lead.confirmo_cita:
+            leads = memory.get_all_leads()
+            for lead in leads:
+                if not lead.fecha_visita:
+                    continue
+                if lead.confirmo_cita:
+                    continue
+                if lead.estado == "Cancelado":
+                    continue
+                if _has_nota(lead, NOTA_ALERTA_SIN_CONFIRMACION):
+                    continue
+
+                # Solo si se envió algún recordatorio
+                sent_reminder = (
+                    _has_nota(lead, NOTA_RECORDATORIO_DIA_ANTERIOR)
+                    or _has_nota(lead, NOTA_RECORDATORIO_MISMO_DIA)
+                )
+                if not sent_reminder:
+                    continue
+
+                # Verificar que ya pasaron 3h desde el último mensaje del lead
+                last_ts = _last_user_message_time(memory, lead.phone_number)
+                if last_ts and _minutes_since(last_ts) < 180:
+                    continue
+
+                fv = lead.fecha_visita
+                fv_bogota = datetime(
+                    fv.year, fv.month, fv.day,
+                    fv.hour, fv.minute,
+                    tzinfo=BOGOTA_TZ
+                )
+                hora_str = fv_bogota.strftime("%d/%m %I:%M %p")
+
                 self.telegram.alert_no_confirmation(
                     {
-                        "nombre": lead.nombre,
-                        "whatsapp": lead.whatsapp,
+                        "nombre": lead.nombre or "Sin nombre",
+                        "whatsapp": lead.phone_number,
                     },
-                    f"{fecha_str} a las {hora_str}",
+                    hora_str,
                 )
-                print(f"[ALERT] Notified owner about unconfirmed visit for {phone_number}")
+                _add_nota(memory, lead.phone_number, NOTA_ALERTA_SIN_CONFIRMACION)
+                print(f"[SCHEDULER] Alerta sin confirmación enviada para {lead.phone_number}")
 
             memory.close()
 
         except Exception as e:
-            print(f"Error alerting owner: {e}")
+            print(f"[ERROR] alert_no_confirmation: {e}")
+            try:
+                self.telegram.alert_technical_error(str(e), "alert_no_confirmation")
+            except Exception:
+                pass
