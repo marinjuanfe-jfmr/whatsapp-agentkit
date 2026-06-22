@@ -49,6 +49,8 @@ def _last_user_message_time(memory: Memory, phone_number: str):
 
 def _minutes_since(ts_utc) -> float:
     """Minutos transcurridos desde un timestamp UTC naive."""
+    if isinstance(ts_utc, str):
+        ts_utc = datetime.fromisoformat(ts_utc)
     now_utc = datetime.utcnow()
     return (now_utc - ts_utc).total_seconds() / 60
 
