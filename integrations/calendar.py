@@ -13,9 +13,11 @@ VISIT_DURATION_MINUTES = 20
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 AVAILABLE_WINDOWS = [
-    {"date": "2026-06-18", "start": "09:40", "end": "13:00"},  # Jueves mañana
+    {"date": "2026-06-18", "start": "09:40", "end": "13:00"},  # Jueves mañana (pasado)
+    {"date": "2026-06-18", "start": "14:00", "end": "18:20"},  # Jueves tarde (pasado)
     {"date": "2026-06-22", "start": "09:40", "end": "13:00"},  # Lunes mañana
-    {"date": "2026-06-22", "start": "14:00", "end": "18:20"},  # Lunes tarde
+    {"date": "2026-06-22", "start": "14:40", "end": "18:20"},  # Lunes tarde (14:00–14:20 excluidos; 14:40 ya agendado)
+    {"date": "2026-06-27", "start": "14:00", "end": "18:00"},  # Sábado tarde
 ]
 
 
