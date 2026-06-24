@@ -42,14 +42,14 @@ AGENT_TOOLS = [
     },
     {
         "name": "schedule_visit",
-        "description": "Schedule a NEW visit in Google Calendar. Call ONCE after the prospect chooses date and time AND you already know their nombre and num_personas. If you don't have nombre or num_personas yet, ask for them in the same message instead of telling the prospect the visit is confirmed — never say the visit is scheduled/confirmed without calling this tool in the same turn. Do NOT call if [CITA YA AGENDADA] appears in context — use reschedule_visit instead.",
+        "description": "Schedule a NEW visit in Google Calendar. Call ONCE after the prospect chooses date and time AND you already know their nombre and num_personas. If you don't have nombre or num_personas yet, ask for them in the same message instead of telling the prospect the visit is confirmed — never say the visit is scheduled/confirmed without calling this tool in the same turn. Do NOT call if [CITA YA AGENDADA] appears in context — use reschedule_visit instead. IMPORTANT: if num_personas is greater than 4, do NOT call this tool — instead inform the prospect that the apartment has a maximum of 4 occupants and it is not possible to schedule a visit.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "date": {"type": "string", "description": "Visit date in YYYY-MM-DD format"},
                 "time": {"type": "string", "description": "Visit time in HH:MM format"},
                 "nombre": {"type": "string", "description": "Lead name"},
-                "num_personas": {"type": "integer", "description": "Number of people attending"},
+                "num_personas": {"type": "integer", "description": "Number of people who will live in the apartment. Maximum allowed is 4. If the prospect says more than 4, do not schedule — inform them of the limit instead."},
             },
             "required": ["date", "time", "nombre", "num_personas"],
         },
@@ -89,7 +89,7 @@ AGENT_TOOLS = [
             "type": "object",
             "properties": {
                 "nombre": {"type": "string", "description": "Lead full name"},
-                "personas": {"type": "integer", "description": "Number of persons who will live in the apartment"},
+                "personas": {"type": "integer", "description": "Number of persons who will live in the apartment. Maximum allowed is 4. If the prospect mentions more than 4, save the value but do NOT proceed to schedule — inform them of the limit."},
                 "ocupacion": {"type": "string", "description": "Occupation or income source"},
                 "ingresos": {"type": "number", "description": "Monthly income in COP (only if prospect mentioned it voluntarily)"},
                 "mascotas": {"type": "boolean", "description": "Has pets (true/false)"},

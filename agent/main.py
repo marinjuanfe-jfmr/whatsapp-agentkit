@@ -40,7 +40,7 @@ RESCHEDULE_KEYWORDS = [
 ]
 
 # --- Protección anti-bot ---
-REPEAT_DETECTION_COUNT = 3        # cuántos mensajes iguales consecutivos disparan el bloqueo
+REPEAT_DETECTION_COUNT = 5        # cuántos mensajes iguales consecutivos disparan el bloqueo
 
 
 def user_wants_reschedule(message_text: str) -> bool:
