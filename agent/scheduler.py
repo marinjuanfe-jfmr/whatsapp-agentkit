@@ -55,6 +55,13 @@ def _minutes_since(ts_utc) -> float:
     return (now_utc - ts_utc).total_seconds() / 60
 
 
+def _parse_fecha_visita(fv) -> datetime:
+    """Convierte fecha_visita a datetime con timezone Bogotá, sea datetime o string."""
+    if isinstance(fv, str):
+        fv = datetime.fromisoformat(fv)
+    return datetime(fv.year, fv.month, fv.day, fv.hour, fv.minute, tzinfo=BOGOTA_TZ)
+
+
 def _has_nota(lead: Lead, nota: str) -> bool:
     return lead.notas and nota in lead.notas
 
@@ -229,13 +236,8 @@ class TaskScheduler:
                 if _has_nota(lead, NOTA_RECORDATORIO_DIA_ANTERIOR):
                     continue
 
-                # fecha_visita está en UTC naive en DB — convertir
-                fv = lead.fecha_visita
-                fv_bogota = datetime(
-                    fv.year, fv.month, fv.day,
-                    fv.hour, fv.minute,
-                    tzinfo=BOGOTA_TZ
-                )
+                # fecha_visita puede llegar como str o datetime desde SQLite
+                fv_bogota = _parse_fecha_visita(lead.fecha_visita)
                 if fv_bogota.date() != tomorrow:
                     continue
 
@@ -282,14 +284,7 @@ class TaskScheduler:
                 if _has_nota(lead, NOTA_RECORDATORIO_MISMO_DIA):
                     continue
 
-                fv = lead.fecha_visita
-                fv_bogota = datetime(
-                    fv.year, fv.month, fv.day,
-                    fv.hour, fv.minute,
-                    tzinfo=BOGOTA_TZ
-                )
-
-                # Solo visitas de hoy
+                fv_bogota = _parse_fecha_visita(lead.fecha_visita)
                 if fv_bogota.date() != now.date():
                     continue
 
@@ -358,12 +353,7 @@ class TaskScheduler:
                 if last_ts and _minutes_since(last_ts) < 180:
                     continue
 
-                fv = lead.fecha_visita
-                fv_bogota = datetime(
-                    fv.year, fv.month, fv.day,
-                    fv.hour, fv.minute,
-                    tzinfo=BOGOTA_TZ
-                )
+                fv_bogota = _parse_fecha_visita(lead.fecha_visita)
                 hora_str = fv_bogota.strftime("%d/%m %I:%M %p")
 
                 self.telegram.alert_no_confirmation(
