@@ -30,9 +30,20 @@ class Memory:
 
     def save_conversation(self, phone_number: str, role: str, message: str) -> None:
         """Save message to conversation history"""
-        conv = Conversation(phone_number=phone_number, role=role, message=message)
-        self.db.add(conv)
-        self.db.commit()
+        try:
+            conv = Conversation(phone_number=phone_number, role=role, message=message)
+            self.db.add(conv)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            # Reintentar una vez tras rollback (recupera sesión de PendingRollbackError)
+            try:
+                conv = Conversation(phone_number=phone_number, role=role, message=message)
+                self.db.add(conv)
+                self.db.commit()
+            except Exception as e:
+                self.db.rollback()
+                print(f"[ERROR] save_conversation reintento fallido: {e}")
 
     def get_conversation_history(self, phone_number: str, last_n: int = 20) -> List[Dict]:
         """Get last N messages from conversation"""
@@ -61,15 +72,47 @@ class Memory:
             self.db.commit()
         return lead
 
+    # Campos que el modelo define como Boolean — el LLM a veces devuelve strings
+    _BOOLEAN_FIELDS = {"mascotas", "vehiculos", "acepta_poliza", "interes_compra",
+                       "confirmo_cita", "reagendo_cita"}
+
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        """Convierte cualquier valor a bool de forma segura."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() not in ("", "no", "false", "0", "none", "null")
+        return bool(value)
+
     def update_lead(self, phone_number: str, **kwargs) -> Lead:
         """Update lead data"""
-        lead = self.get_or_create_lead(phone_number)
-        for key, value in kwargs.items():
-            if hasattr(lead, key):
-                setattr(lead, key, value)
-        lead.updated_at = datetime.utcnow()
-        self.db.commit()
-        return lead
+        # Sanitizar campos booleanos antes de tocar la DB
+        for field in self._BOOLEAN_FIELDS:
+            if field in kwargs and not isinstance(kwargs[field], bool):
+                kwargs[field] = self._coerce_bool(kwargs[field])
+        try:
+            lead = self.get_or_create_lead(phone_number)
+            for key, value in kwargs.items():
+                if hasattr(lead, key):
+                    setattr(lead, key, value)
+            lead.updated_at = datetime.utcnow()
+            self.db.commit()
+            return lead
+        except Exception:
+            self.db.rollback()
+            try:
+                lead = self.get_or_create_lead(phone_number)
+                for key, value in kwargs.items():
+                    if hasattr(lead, key):
+                        setattr(lead, key, value)
+                lead.updated_at = datetime.utcnow()
+                self.db.commit()
+                return lead
+            except Exception as e:
+                self.db.rollback()
+                print(f"[ERROR] update_lead reintento fallido para {phone_number}: {e}")
+                return self.get_or_create_lead(phone_number)
 
     def get_lead(self, phone_number: str) -> Optional[Lead]:
         """Get lead by phone number"""
