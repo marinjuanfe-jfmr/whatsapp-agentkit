@@ -12,6 +12,10 @@ class QualificationValidator:
     def validate_ingresos(ingresos: Optional[float]) -> Tuple[bool, str]:
         if ingresos is None:
             return True, "income_not_declared"  # Póliza validates it
+        try:
+            ingresos = float(ingresos)
+        except (ValueError, TypeError):
+            return True, "income_not_parseable"
         if ingresos < QualificationValidator.MIN_INCOME:
             return False, "income_insufficient"
         return True, "income_valid"
@@ -27,6 +31,10 @@ class QualificationValidator:
     @staticmethod
     def validate_personas(personas: Optional[int]) -> Tuple[bool, str]:
         if personas is None:
+            return False, "personas_missing"
+        try:
+            personas = int(personas)
+        except (ValueError, TypeError):
             return False, "personas_missing"
         if personas > QualificationValidator.MAX_PERSONS:
             return False, "personas_too_many"
