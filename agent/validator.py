@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Optional, Tuple
 
 
@@ -29,14 +30,29 @@ class QualificationValidator:
         return True, "poliza_accepted"
 
     @staticmethod
+    def _parse_personas(personas) -> Optional[int]:
+        """Extract an integer from personas, which may be a composite string like '4 — 2 adultos y 2 niñas'."""
+        if personas is None:
+            return None
+        try:
+            return int(personas)
+        except (ValueError, TypeError):
+            pass
+        import re
+        match = re.search(r"\d+", str(personas))
+        if match:
+            return int(match.group())
+        return None
+
+    @staticmethod
     def validate_personas(personas: Optional[int]) -> Tuple[bool, str]:
         if personas is None:
             return False, "personas_missing"
-        try:
-            personas = int(personas)
-        except (ValueError, TypeError):
-            return False, "personas_missing"
-        if personas > QualificationValidator.MAX_PERSONS:
+        count = QualificationValidator._parse_personas(personas)
+        if count is None:
+            # Can't parse — don't reject, treat as unknown
+            return True, "personas_not_parseable"
+        if count > QualificationValidator.MAX_PERSONS:
             return False, "personas_too_many"
         return True, "personas_valid"
 
