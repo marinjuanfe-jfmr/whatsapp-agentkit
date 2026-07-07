@@ -13,7 +13,7 @@ VISIT_DURATION_MINUTES = 20
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 AVAILABLE_WINDOWS = [
-    {"date": "2026-07-05", "start": "13:40", "end": "17:40"},  # Domingo tarde
+    {"date": "2026-07-12", "start": "14:00", "end": "17:40"},  # Domingo tarde
 ]
 
 
