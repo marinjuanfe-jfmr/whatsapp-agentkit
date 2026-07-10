@@ -94,32 +94,37 @@ class TaskScheduler:
                 name="Detectar conversaciones inactivas",
             )
 
-            # Recordatorio día anterior: cron 18:00 Bogotá
-            self.scheduler.add_job(
-                self.send_reminder_day_before,
-                CronTrigger(hour=18, minute=0, timezone=str(BOGOTA_TZ)),
-                id="reminder_day_before",
-                name="Recordatorio visita día anterior",
-            )
-
-            # Recordatorio mismo día: revisar cada 30 minutos, empezando de inmediato
-            self.scheduler.add_job(
-                self.send_reminder_same_day,
-                IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
-                id="reminder_same_day",
-                name="Recordatorio visita mismo día (2h antes)",
-            )
-
-            # Alerta sin confirmación: revisar cada 30 minutos
-            self.scheduler.add_job(
-                self.alert_no_confirmation,
-                IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
-                id="alert_no_confirmation",
-                name="Alerta dueño por visita sin confirmar",
-            )
+            # DESACTIVADOS (9 jul 2026) — el apartamento ya fue arrendado y Juan
+            # cancelará manualmente las visitas programadas, así que Robin no debe
+            # escribir a nadie a confirmar/recordar citas. Para reactivar, descomentar
+            # estos tres add_job.
+            #
+            # # Recordatorio día anterior: cron 18:00 Bogotá
+            # self.scheduler.add_job(
+            #     self.send_reminder_day_before,
+            #     CronTrigger(hour=18, minute=0, timezone=str(BOGOTA_TZ)),
+            #     id="reminder_day_before",
+            #     name="Recordatorio visita día anterior",
+            # )
+            #
+            # # Recordatorio mismo día: revisar cada 30 minutos, empezando de inmediato
+            # self.scheduler.add_job(
+            #     self.send_reminder_same_day,
+            #     IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
+            #     id="reminder_same_day",
+            #     name="Recordatorio visita mismo día (2h antes)",
+            # )
+            #
+            # # Alerta sin confirmación: revisar cada 30 minutos
+            # self.scheduler.add_job(
+            #     self.alert_no_confirmation,
+            #     IntervalTrigger(minutes=30, start_date=datetime.now(tz=BOGOTA_TZ)),
+            #     id="alert_no_confirmation",
+            #     name="Alerta dueño por visita sin confirmar",
+            # )
 
             self.scheduler.start()
-            print("[SCHEDULER] Iniciado — jobs registrados: check_inactivity (5min), reminder_day_before (18:00), reminder_same_day (30min), alert_no_confirmation (30min)")
+            print("[SCHEDULER] Iniciado — jobs registrados: check_inactivity (5min). Recordatorios de visita DESACTIVADOS (apartamento ya arrendado).")
 
     def stop(self):
         if self.scheduler.running:
